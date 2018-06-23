@@ -1,26 +1,49 @@
+use super::Result;
 use std::iter::Peekable;
 use std::str::Chars;
+use std::fmt::{Display, Formatter, Error};
+use std::result;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Token {
 	Num(f64),
 	Op(char)
 }
 
+impl Token {
+	pub fn unexpected<T>(&self) -> Result<T> {
+		Err(format!("Unexpected token {}", self))
+	}
+}
+
+impl Display for Token {
+	fn fmt(&self, f: &mut Formatter) -> result::Result<(), Error> {
+		match self {
+			Token::Num(value) => write!(f, "{}", value),
+			Token::Op(value) => write!(f, "'{}'", value)
+		}
+	}
+}
+
+
+
 pub struct Lexer<'a> {
-	input: Peekable<Chars<'a>>
+	input: Peekable<Chars<'a>>,
+	peeked: Option<Result<Token>>
 }
 
 impl<'a> Lexer<'a> {
 	pub fn new(input: &str) -> Lexer {
 		Lexer {
-			input: input.chars().peekable()
+			input: input.chars().peekable(),
+			peeked: None
 		}
 	}
 
-	fn read_number(&mut self) -> Result<f64, String> {
+	fn read_number(&mut self) -> Result<Token> {
 		let mut num = 0.0;
 		let mut den = 0.0;
+
 		while let Some(&c) = self.input.peek() {
 			if let Some(d) = c.to_digit(10) {
 				self.input.next();
@@ -37,39 +60,54 @@ impl<'a> Lexer<'a> {
 				break
 			}
 		}
-		if den == 0.0 {
-			Ok(num)
+
+		Ok(Token::Num(if den == 0.0 {
+			num
 		} else {
-			Ok(num / den)
+			num / den
+		}))
+	}
+
+	pub fn peek(&mut self) -> Option<Result<Token>> {
+		if self.peeked == None {
+			while self.input.peek()?.is_whitespace() {
+				self.input.next();
+			}
+			let c = *self.input.peek()?;
+
+			self.peeked = Some(if "()|^*/+-".contains(c) {
+				self.input.next();
+				Ok(Token::Op(c))
+			} else if c.is_digit(10) || c == '.' {
+				self.read_number()
+			} else {
+				Err(format!("Unknown symbol '{}'", c))
+			});
 		}
+		self.peeked.clone()
+	}
+
+	pub fn peek_result(&mut self) -> Result<Token> {
+		self.peek().ok_or(format!("Unexpected end"))?
+	}
+
+	pub fn next_result(&mut self) -> Result<Token> {
+		let result = self.peek_result();
+		self.peeked = None;
+		result
 	}
 }
 
 impl<'a> Iterator for Lexer<'a> {
-	type Item = Result<Token, String>;
-
-	fn next(&mut self) -> Option<Result<Token, String>> {
-		while self.input.peek()?.is_whitespace() {
-			self.input.next();
-		}
-		let c = *self.input.peek()?;
-
-		if "()|e^*/\\+-".contains(c) {
-			self.input.next();
-			Some(Ok(Token::Op(match c {
-				'\\' => '/',
-				c => c
-			})))
-		} else if c.is_digit(10) || c == '.' {
-			match self.read_number() {
-				Ok(value) => Some(Ok(Token::Num(value))),
-				Err(error) => Some(Err(error))
-			}
-		} else {
-			Some(Err(format!("Unknown symbol '{}'", c)))
-		}
+	type Item = Result<Token>;
+	fn next(&mut self) -> Option<Result<Token>> {
+		let option = self.peek();
+		self.peeked = None;
+		option
 	}
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -83,13 +121,12 @@ mod tests {
 
 	#[test]
 	fn symbols() {
-		lexer_test("()| ^ */\\ +-", vec![
+		lexer_test("()| ^ */ +-", vec![
 			Token::Op('('),
 			Token::Op(')'),
 			Token::Op('|'),
 			Token::Op('^'),
 			Token::Op('*'),
-			Token::Op('/'),
 			Token::Op('/'),
 			Token::Op('+'),
 			Token::Op('-')
@@ -116,14 +153,21 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic]
-	fn error_unknown_symbol() {
+	#[should_panic(expected = "Unknown symbol \\'!\\'")]
+	fn error_unknown() {
 		lexer_test("!", vec![])
 	}
 
 	#[test]
-	#[should_panic]
-	fn error_unexpected_symbol() {
+	#[should_panic(expected = "Unexpected symbol \\'.\\'")]
+	fn error_unexpected() {
 		lexer_test("1.2.3", vec![])
+	}
+
+	#[test]
+	fn peek() {
+		let mut lexer = Lexer::new("1");
+		lexer.peek();
+		assert_eq!(lexer.next(), Some(Ok(Token::Num(1.0))));
 	}
 }
