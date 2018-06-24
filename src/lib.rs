@@ -51,8 +51,58 @@ fn parse_unary(lexer: &mut Lexer) -> Result<f64> {
 	}
 }
 
+fn parse_pow(lexer: &mut Lexer) -> Result<f64> {
+	let mut value = parse_unary(lexer)?;
+	if let Some(result) = lexer.peek() {
+		match result? {
+			Token::Op('^') => {
+				lexer.next();
+				value = value.powf(parse_pow(lexer)?);
+			},
+			_ => ()
+		}
+	}
+	Ok(value)
+}
+
+fn parse_muldiv(lexer: &mut Lexer) -> Result<f64> {
+	let mut value = parse_pow(lexer)?;
+	while let Some(result) = lexer.peek() {
+		match result? {
+			Token::Op('*') => {
+				lexer.next();
+				value *= parse_pow(lexer)?;
+			},
+			Token::Op('/') => {
+				lexer.next();
+				value /= parse_pow(lexer)?;
+			},
+			_ => break
+		}
+	}
+	Ok(value)
+}
+
+fn parse_addsub(lexer: &mut Lexer) -> Result<f64> {
+	let mut value = parse_muldiv(lexer)?;
+	while let Some(result) = lexer.peek() {
+		match result? {
+			Token::Op('+') => {
+				lexer.next();
+				value += parse_muldiv(lexer)?;
+			},
+			Token::Op('-') => {
+				lexer.next();
+				value -= parse_muldiv(lexer)?;
+			},
+			_ => break
+		}
+	}
+	Ok(value)
+}
+
 fn parse_expression(lexer : &mut Lexer) -> Result<f64> {
-	parse_unary(lexer)
+	parse_addsub(lexer)
 }
 
 pub fn parse(input: &str) -> Result<f64> {
@@ -167,7 +217,7 @@ mod tests {
 
 	#[test]
 	fn order2() {
-		parse_test("2.0 + 2.1 * 2.2", 4.96)
+		parse_test("2.0 + 2.1 * 3.3", 8.93)
 	}
 
 	#[test]
