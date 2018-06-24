@@ -1,58 +1,69 @@
 pub mod lexer;
 use lexer::*;
-type Result<T> = std::result::Result<T, String>;
+use std::fmt::{Display, Formatter, Error};
+use std::result;
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum ParseError {
+	UnexpectedEnd,
+	UnknownSymbol(char),
+	UnexpectedSymbol(char),
+	UnexpectedToken(Token)
+}
+
+impl Display for ParseError {
+	fn fmt(&self, f: &mut Formatter) -> result::Result<(), Error> {
+		match self {
+			ParseError::UnexpectedEnd => write!(f, "Unexpected end"),
+			ParseError::UnknownSymbol(c) => write!(f, "Unknown symbol '{}'", c),
+			ParseError::UnexpectedSymbol(c) => write!(f, "Unexpected symbol '{}'", c),
+			ParseError::UnexpectedToken(token) => write!(f, "Unexpected token {}", token)
+		}
+	}
+}
+
+type Result<T> = result::Result<T, ParseError>;
+
+
 
 fn parse_value(lexer: &mut Lexer) -> Result<f64> {
-	match lexer.next_result()? {
-		Token::Num(value) => Ok(value),
-		token => token.unexpected()
-	}
-}
-
-fn parse_brackets(lexer: &mut Lexer) -> Result<f64> {
-	match lexer.peek_result()? {
-		Token::Op('(') => {
-			lexer.next();
-			let result = parse_expression(lexer)?;
-			match lexer.next_result()? {
-				Token::Op(')') => Ok(result),
-				token => token.unexpected()
-			}
-		},
-		_ => parse_value(lexer)
-	}
-}
-
-fn parse_abs(lexer: &mut Lexer) -> Result<f64> {
-	match lexer.peek_result()? {
-		Token::Op('|') => {
-			lexer.next();
-			let result = parse_expression(lexer)?;
-			match lexer.next_result()? {
-				Token::Op('|') => Ok(result.abs()),
-				token => token.unexpected()
-			}
-		},
-		_ => parse_brackets(lexer)
-	}
-}
-
-fn parse_unary(lexer: &mut Lexer) -> Result<f64> {
-	match lexer.peek_result()? {
+	Ok(match lexer.peek_result()? {
 		Token::Op('+') => {
 			lexer.next();
-			parse_abs(lexer)
+			1.0
 		},
 		Token::Op('-') => {
 			lexer.next();
-			Ok(-parse_abs(lexer)?)
+			-1.0
 		},
-		_ => parse_abs(lexer)
-	}
+		_ => 1.0
+	} * match lexer.peek_result()? {
+		Token::Op('(') => {
+			lexer.next();
+			let value = parse_expression(lexer)?;
+			match lexer.next_result()? {
+				Token::Op(')') => value,
+				token => return Err(ParseError::UnexpectedToken(token))
+			}
+		},
+		Token::Op('|') => {
+			lexer.next();
+			let value = parse_expression(lexer)?;
+			match lexer.next_result()? {
+				Token::Op('|') => value.abs(),
+				token => return Err(ParseError::UnexpectedToken(token))
+			}
+		},
+		Token::Num(value) => {
+			lexer.next();
+			value
+		},
+		token => return Err(ParseError::UnexpectedToken(token))
+	})
 }
 
 fn parse_pow(lexer: &mut Lexer) -> Result<f64> {
-	let mut value = parse_unary(lexer)?;
+	let mut value = parse_value(lexer)?;
 	if let Some(result) = lexer.peek() {
 		match result? {
 			Token::Op('^') => {
@@ -65,7 +76,7 @@ fn parse_pow(lexer: &mut Lexer) -> Result<f64> {
 	Ok(value)
 }
 
-fn parse_muldiv(lexer: &mut Lexer) -> Result<f64> {
+fn parse_product(lexer: &mut Lexer) -> Result<f64> {
 	let mut value = parse_pow(lexer)?;
 	while let Some(result) = lexer.peek() {
 		match result? {
@@ -83,17 +94,17 @@ fn parse_muldiv(lexer: &mut Lexer) -> Result<f64> {
 	Ok(value)
 }
 
-fn parse_addsub(lexer: &mut Lexer) -> Result<f64> {
-	let mut value = parse_muldiv(lexer)?;
+fn parse_expression(lexer: &mut Lexer) -> Result<f64> {
+	let mut value = parse_product(lexer)?;
 	while let Some(result) = lexer.peek() {
 		match result? {
 			Token::Op('+') => {
 				lexer.next();
-				value += parse_muldiv(lexer)?;
+				value += parse_product(lexer)?;
 			},
 			Token::Op('-') => {
 				lexer.next();
-				value -= parse_muldiv(lexer)?;
+				value -= parse_product(lexer)?;
 			},
 			_ => break
 		}
@@ -101,15 +112,11 @@ fn parse_addsub(lexer: &mut Lexer) -> Result<f64> {
 	Ok(value)
 }
 
-fn parse_expression(lexer : &mut Lexer) -> Result<f64> {
-	parse_addsub(lexer)
-}
-
 pub fn parse(input: &str) -> Result<f64> {
 	let mut lexer = Lexer::new(input);
 	let value = parse_expression(&mut lexer)?;
 	match lexer.next() {
-		Some(Ok(token)) => token.unexpected(),
+		Some(Ok(token)) => Err(ParseError::UnexpectedToken(token)),
 		Some(Err(error)) => Err(error),
 		None => Ok(value)
 	}
@@ -126,13 +133,13 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected end")]
+	#[should_panic(expected = "UnexpectedEnd")]
 	fn error_none() {
 		parse_test("", 0.0)
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected token 2")]
+	#[should_panic(expected = "UnexpectedToken(Num(2.0))")]
 	fn error_unexpected() {
 		parse_test("1 2", 0.0)
 	}
@@ -148,7 +155,7 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected end")]
+	#[should_panic(expected = "UnexpectedEnd")]
 	fn error_brackets() {
 		parse_test("(3", 0.0)
 	}
@@ -159,7 +166,7 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected end")]
+	#[should_panic(expected = "UnexpectedEnd")]
 	fn error_abs() {
 		parse_test("|4", 4.0)
 	}
@@ -175,7 +182,7 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected token \\'-\\'")]
+	#[should_panic(expected = "UnexpectedToken(Op('-'))")]
 	fn error_double_unary() {
 		parse_test("--4", 0.0)
 	}
@@ -228,5 +235,10 @@ mod tests {
 	#[test]
 	fn averge() {
 		parse_test("(1 + 2 + 3) / 3", 2.0)
+	}
+
+	#[test]
+	fn add_neg() {
+		parse_test("4 + -5", -1.0)
 	}
 }

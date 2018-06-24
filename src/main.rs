@@ -13,8 +13,8 @@ fn main() {
 		io::stdin().read_line(&mut input).unwrap();
 
 		match calc::parse(input.as_str()) {
-			Ok(value) => println!("= {}", value),
-			Err(error) => eprintln!("{}", error)
+			Ok(value) => println!("= {}\n", value),
+			Err(error) => eprintln!("{}\n", error)
 		}
 	}
 }

@@ -1,19 +1,13 @@
-use super::Result;
+use super::{ParseError, Result};
 use std::iter::Peekable;
 use std::str::Chars;
 use std::fmt::{Display, Formatter, Error};
 use std::result;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Token {
 	Num(f64),
 	Op(char)
-}
-
-impl Token {
-	pub fn unexpected<T>(&self) -> Result<T> {
-		Err(format!("Unexpected token {}", self))
-	}
 }
 
 impl Display for Token {
@@ -54,7 +48,7 @@ impl<'a> Lexer<'a> {
 				if den == 0.0 {
 					den = 1.0;
 				} else {
-					return Err(format!("Unexpected symbol '.'"))
+					return Err(ParseError::UnexpectedSymbol('.'))
 				}
 			} else {
 				break
@@ -81,14 +75,14 @@ impl<'a> Lexer<'a> {
 			} else if c.is_digit(10) || c == '.' {
 				self.read_number()
 			} else {
-				Err(format!("Unknown symbol '{}'", c))
+				Err(ParseError::UnknownSymbol(c))
 			});
 		}
-		self.peeked.clone()
+		self.peeked
 	}
 
 	pub fn peek_result(&mut self) -> Result<Token> {
-		self.peek().ok_or(format!("Unexpected end"))?
+		self.peek().ok_or(ParseError::UnexpectedEnd)?
 	}
 
 	pub fn next_result(&mut self) -> Result<Token> {
@@ -153,13 +147,13 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Unknown symbol \\'!\\'")]
+	#[should_panic(expected = "UnknownSymbol('!')")]
 	fn error_unknown() {
 		lexer_test("!", vec![])
 	}
 
 	#[test]
-	#[should_panic(expected = "Unexpected symbol \\'.\\'")]
+	#[should_panic(expected = "UnexpectedSymbol('.')")]
 	fn error_unexpected() {
 		lexer_test("1.2.3", vec![])
 	}
